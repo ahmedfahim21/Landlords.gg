@@ -1,24 +1,26 @@
 import { Wallet } from "@coinbase/onchainkit/wallet";
 import GameBoard from "@/components/game/GameBoard";
 import Chat from "@/components/game/Chat";
+import GameState from "@/components/game/GameState";
 
 export default function GamePage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 to-blue-900">
-      <div className="container mx-auto py-8">
-        <div className="flex justify-end mb-8">
+      <div className="container mx-auto p-2">
+        <div className="flex justify-end mb-4">
           <Wallet />
         </div>
         
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          <div className="lg:col-span-3">
+        <div className="flex justify-center items-center h-[calc(100vh-120px)]">
+          <div className="w-full max-w-[min(90vw,90vh)] aspect-square">
             <GameBoard />
           </div>
-          <div className="lg:col-span-1">
-            <Chat />
-          </div>
+        </div>
+        <div className="fixed bottom-4 right-4 flex gap-4">
+          <GameState />
+          {/* <Chat /> */}
         </div>
       </div>
     </div>
   );
-} 
+}
