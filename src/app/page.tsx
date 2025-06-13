@@ -9,13 +9,20 @@ import { Input } from "@/components/retroui/Input";
 import Link from "next/link";
 import { Wallet } from "@coinbase/onchainkit/wallet";
 import { useName } from '@coinbase/onchainkit/identity';
+import { base } from "viem/chains";
 
 interface PlayerInfo {
   peerId: string;
   address: string;
   baseName?: string;
   role?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: {
+    address?: string;
+    baseName?: string;
+    hasStaked?: boolean;
+    currencyBalance?: string;
+    joinedAt?: string;
+  };
 }
 
 interface LobbyPlayerInfo extends PlayerInfo {
@@ -36,7 +43,8 @@ export default function Home() {
   const [waitingStatus, setWaitingStatus] = useState<string>('');
 
   const { address, isConnected } = useAccount();
-  const { data: baseName } = useName({ address: address as `0x${string}` });
+  const { data: baseName } = useName({ address: address as `0x${string}`, chain: base });
+  
 
   // Local peer hook for managing our own peer data
   const { peerId: myPeerId, updateMetadata } = useLocalPeer({
@@ -54,13 +62,25 @@ export default function Home() {
       lobbyPeerIds.forEach(async (peerId) => {
         const metadata = await getLobbyPeerMetadata(peerId);
         if (metadata && typeof metadata === 'object' && 'address' in metadata) {
-          const playerMetadata = metadata as { address: string; baseName?: string };
+          const playerMetadata = metadata as { 
+            address: string; 
+            baseName?: string;
+            hasStaked?: boolean;
+            currencyBalance?: string;
+            joinedAt?: string;
+          };
           updatedLobbyPlayers.push({
             peerId,
             address: playerMetadata.address,
             baseName: playerMetadata.baseName,
             waitingTime: new Date(),
-            metadata
+            metadata: {
+              address: playerMetadata.address,
+              baseName: playerMetadata.baseName,
+              hasStaked: playerMetadata.hasStaked,
+              currencyBalance: playerMetadata.currencyBalance,
+              joinedAt: playerMetadata.joinedAt
+            }
           });
         }
       });
@@ -221,7 +241,7 @@ export default function Home() {
           payload: JSON.stringify({
             address,
             baseName: baseName || undefined,
-            joinedAt: new Date().toISOString()
+            joinedAt: new Date().toISOString(),
           }),
           label: 'player_info'
         });
@@ -358,6 +378,19 @@ export default function Home() {
       return;
     }
     
+    // Check if all players have staked
+    const stakedPlayers = players.filter(player => 
+      player.metadata && 
+      typeof player.metadata === 'object' && 
+      'hasStaked' in player.metadata && 
+      player.metadata.hasStaked
+    );
+    
+    if (stakedPlayers.length !== players.length) {
+      setError('All players must stake before starting the game');
+      return;
+    }
+    
     sendData({
       to: '*',
       payload: JSON.stringify({ action: 'start' }),
@@ -401,6 +434,7 @@ export default function Home() {
                   </Card.Description>
                 </Card.Header>
                 <Card.Content className="space-y-6">
+
                   {/* Create Room Section */}
                   <div className="p-6 bg-purple-900/30 rounded-lg border border-purple-500/30">
                     <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
@@ -417,7 +451,7 @@ export default function Home() {
                       <Button 
                         onClick={createRoom} 
                         disabled={!isConnected || !roomName}
-                        className="bg-purple-600 hover:bg-purple-700 text-white px-8"
+                        className="bg-purple-600 hover:bg-purple-700 text-white px-8 disabled:opacity-50"
                       >
                         Create & Host
                       </Button>
@@ -450,7 +484,7 @@ export default function Home() {
                       <Button 
                         onClick={joinRoomHandler}
                         disabled={isJoining || state === 'connected' || !isConnected || !roomId}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-8"
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-8 disabled:opacity-50"
                       >
                         {isJoining ? 'Joining...' : 'Join Game'}
                       </Button>
@@ -459,10 +493,17 @@ export default function Home() {
 
                   {/* Wallet Connection Prompt */}
                   {!isConnected && (
-                    <div className="p-4 bg-orange-900/30 border border-orange-500/30 rounded-lg">
-                      <p className="text-orange-200 text-center">
-                        🔐 Connect your wallet to create or join rooms
+                    <div className="p-6 bg-orange-900/30 border border-orange-500/30 rounded-lg">
+                      <h3 className="text-lg font-semibold text-white mb-2 flex items-center">
+                        <span className="w-8 h-8 bg-orange-600 rounded-full flex items-center justify-center text-sm font-bold mr-3">!</span>
+                        Connect Wallet
+                      </h3>
+                      <p className="text-orange-200 text-center mb-4">
+                        🔐 Connect your wallet to stake and participate in games
                       </p>
+                      <div className="flex justify-center">
+                        <Wallet />
+                      </div>
                     </div>
                   )}
 
@@ -501,22 +542,50 @@ export default function Home() {
                           Leave Room
                         </Button>
                         {isAdmin && !gameStarted && (
-                          <Button 
-                            onClick={startGame}
-                            disabled={players.length < 2}
-                            className="bg-green-600 hover:bg-green-700 text-white"
-                          >
-                            Start Game ({players.length}/4)
-                          </Button>
+                          <div className="text-right">
+                            <Button 
+                              onClick={startGame}
+                              disabled={players.length < 2}
+                              className="bg-green-600 hover:bg-green-700 text-white"
+                            >
+                              Start Game ({players.length}/4)
+                            </Button>
+                            {players.length >= 2 && (
+                              <div className="text-xs text-green-300 mt-1">
+                                {(() => {
+                                  const stakedCount = players.filter(player => 
+                                    player.metadata && 
+                                    typeof player.metadata === 'object' && 
+                                    'hasStaked' in player.metadata && 
+                                    player.metadata.hasStaked
+                                  ).length;
+                                  return stakedCount === players.length 
+                                    ? '✅ All players staked'
+                                    : `⚠️ ${stakedCount}/${players.length} players staked`;
+                                })()}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
                   </Card.Header>
                   <Card.Content>
-                    <div className="grid grid-cols-3 gap-4 text-center">
+                    <div className="grid grid-cols-4 gap-4 text-center">
                       <div className="p-3 bg-blue-900/30 rounded-lg">
                         <div className="text-2xl font-bold text-blue-300">{players.length}</div>
                         <div className="text-sm text-blue-200">Active Players</div>
+                      </div>
+                      <div className="p-3 bg-green-900/30 rounded-lg">
+                        <div className="text-2xl font-bold text-green-300">
+                          {players.filter(player => 
+                            player.metadata && 
+                            typeof player.metadata === 'object' && 
+                            'hasStaked' in player.metadata && 
+                            player.metadata.hasStaked
+                          ).length}
+                        </div>
+                        <div className="text-sm text-green-200">Staked Players</div>
                       </div>
                       <div className="p-3 bg-yellow-900/30 rounded-lg">
                         <div className="text-2xl font-bold text-yellow-300">{lobbyPlayers.length}</div>
@@ -598,6 +667,7 @@ export default function Home() {
 
           {/* Sidebar */}
           <div className="space-y-6">
+
             {/* Connected Players */}
             {currentRoomId && (
               <Card className="bg-black/20 backdrop-blur-md border-blue-500/30">
@@ -609,11 +679,19 @@ export default function Home() {
                     {players.map((player) => (
                       <div key={player.peerId} className="flex items-center justify-between p-3 bg-blue-900/20 rounded-lg">
                         <div className="flex items-center space-x-3">
-                          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-sm font-bold">
+                          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-sm font-bold relative">
                             {displayName(player).charAt(0).toUpperCase()}
+                            {player.metadata && typeof player.metadata === 'object' && 'hasStaked' in player.metadata && player.metadata.hasStaked && (
+                              <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border border-blue-900"></div>
+                            )}
                           </div>
                           <div>
-                            <div className="font-medium text-white text-sm">{displayName(player)}</div>
+                            <div className="font-medium text-white text-sm flex items-center gap-2">
+                              {displayName(player)}
+                              {player.metadata && typeof player.metadata === 'object' && 'hasStaked' in player.metadata && player.metadata.hasStaked && (
+                                <span className="text-green-400 text-xs">✓ Staked</span>
+                              )}
+                            </div>
                             <div className="text-xs text-blue-300">
                               {player.peerId === myPeerId ? 'You' : 'Player'}
                             </div>
@@ -652,45 +730,27 @@ export default function Home() {
                   </div>
                   <div className="flex items-start space-x-2">
                     <span className="text-purple-400">2.</span>
-                    <span>Create a room or join with code</span>
+                    <span>Stake 0.001 ETH to get 1,500 BaseBucks</span>
                   </div>
                   <div className="flex items-start space-x-2">
                     <span className="text-purple-400">3.</span>
-                    <span>Wait for 2-4 players to join</span>
+                    <span>Create a room or join with code</span>
                   </div>
                   <div className="flex items-start space-x-2">
                     <span className="text-purple-400">4.</span>
-                    <span>Admin starts the game</span>
+                    <span>Wait for 2-4 players to join</span>
                   </div>
                   <div className="flex items-start space-x-2">
                     <span className="text-purple-400">5.</span>
+                    <span>Admin starts the game</span>
+                  </div>
+                  <div className="flex items-start space-x-2">
+                    <span className="text-purple-400">6.</span>
                     <span>Buy properties, collect rent, win!</span>
                   </div>
                 </div>
               </Card.Content>
             </Card>
-
-            {/* Status Messages */}
-            {(error || success) && (
-              <Card className={`bg-black/20 backdrop-blur-md ${error ? 'border-red-500/30' : 'border-green-500/30'}`}>
-                <Card.Content className="p-4">
-                  <div className={`text-center ${error ? 'text-red-200' : 'text-green-200'}`}>
-                    {error && (
-                      <div className="flex items-center justify-center space-x-2">
-                        <span>❌</span>
-                        <span>{error}</span>
-                      </div>
-                    )}
-                    {success && (
-                      <div className="flex items-center justify-center space-x-2">
-                        <span>✅</span>
-                        <span>{success}</span>
-                      </div>
-                    )}
-                  </div>
-                </Card.Content>
-              </Card>
-            )}
           </div>
         </div>
       </div>

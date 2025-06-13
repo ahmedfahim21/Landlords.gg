@@ -3,11 +3,12 @@
 import { useState, useEffect } from 'react';
 import PropertySquare from './PropertySquare';
 import SpecialSquare from './SpecialSquare';
+import PropertySidebar from './PropertySidebar';
 import { gameData } from '@/data/game-data';
 import { Tooltip } from '../retroui/Tooltip';
 import { Card } from '../retroui/Card';
 import { Text } from '../retroui/Text';
-import { useDataMessage, usePeerIds } from '@huddle01/react/hooks';
+import { useDataMessage, usePeerIds, useLocalPeer } from '@huddle01/react/hooks';
 
 interface Player {
   peerId: string;
@@ -32,6 +33,8 @@ interface GameState {
 export default function GameBoard() {
   const { tiles, properties } = gameData;
   const { peerIds } = usePeerIds();
+  const { peerId: myPeerId } = useLocalPeer();
+  const { sendData } = useDataMessage();
   
   const [gameState, setGameState] = useState<GameState>({
     players: [],
@@ -41,6 +44,42 @@ export default function GameBoard() {
     gameStarted: false,
     gamePhase: 'waiting'
   });
+  
+  // Get current player position
+  const currentPlayerPosition = gameState.players.find(p => p.peerId === gameState.currentPlayer)?.position || 0;
+  const isCurrentPlayer = gameState.currentPlayer === myPeerId;
+  
+
+  // Handle property purchase
+  const handleBuyProperty = (propertyId: string) => {
+    if (!myPeerId || myPeerId !== gameState.currentPlayer) return;
+    
+    const property = properties.find(p => p.id === propertyId);
+    const currentPlayer = gameState.players.find(p => p.peerId === myPeerId);
+    
+    if (!property || !currentPlayer || !property.price) return;
+    
+    if (currentPlayer.money < property.price) return; // Not enough money
+    
+    // Update player money and properties
+    const updatedPlayer = {
+      ...currentPlayer,
+      money: currentPlayer.money - property.price,
+      properties: [...currentPlayer.properties, propertyId]
+    };
+    
+    // Send transaction to all players
+    sendData({
+      to: '*',
+      payload: JSON.stringify({
+        action: 'property_purchase',
+        propertyId: propertyId,
+        buyerId: currentPlayer.peerId,
+        newMoney: updatedPlayer.money
+      }),
+      label: 'game_transaction'
+    });
+  };
 
   useDataMessage({
     onMessage: (payload, from, label) => {
@@ -100,6 +139,23 @@ export default function GameBoard() {
               }));
             }
             break;
+            
+          case 'game_transaction':
+            if (data.action === 'property_purchase') {
+              setGameState(prev => ({
+                ...prev,
+                players: prev.players.map(p => 
+                  p.peerId === data.buyerId 
+                    ? { 
+                        ...p, 
+                        money: data.newMoney, 
+                        properties: [...p.properties, data.propertyId] 
+                      } 
+                    : p
+                )
+              }));
+            }
+            break;
         }
       } catch (error) {
         console.error('Error parsing game board message:', error);
@@ -115,6 +171,11 @@ export default function GameBoard() {
     }));
   }, [peerIds]);
 
+  // Assign a unique color to each player based on their index in the players array
+  const playerColors = Object.fromEntries(
+    gameState.players.map((p, i) => [p.peerId, `hsl(${i * 137.5 % 360}, 70%, 50%)`])
+  );
+
   const getPropertyData = (tileId: string) => {
     return properties.find(prop => prop.id === tileId);
   };
@@ -129,6 +190,7 @@ export default function GameBoard() {
       property: propertyData,
       position: index,
       players: playersOnSquare,
+      playerColors, // pass color map
       isCurrentPlayerSquare: playersOnSquare.some(p => p.peerId === gameState.currentPlayer),
       gamePhase: gameState.gamePhase
     };
@@ -157,140 +219,147 @@ export default function GameBoard() {
   const rightColumn = tiles.slice(31, 40);
 
   return (
-    <Tooltip.Provider>
-      <div className="w-full h-full flex items-center justify-center">
-        <div className="w-full h-full relative">
-          {/* Decorative border */}
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-2 shadow-2xl">
-            <div className="w-full h-full bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl p-2">
-              <div className="w-full h-full grid grid-cols-11 grid-rows-11 gap-0">
-                {/* Top Row */}
-                <div className="col-span-11 row-span-1 grid grid-cols-11 gap-0">
-                  {/* Free Parking Corner */}
-                  <div className="aspect-square">
-                    {renderSquare(topRow[0], 20)}
-                  </div>
-                  {/* Top properties */}
-                  {topRow.slice(1, -1).map((tile, idx) => (
-                    <div key={`top-${idx}`} className="aspect-square transform rotate-180">
-                      {renderSquare(tile, 21 + idx)}
-                    </div>
-                  ))}
-                  {/* Go to Jail Corner */}
-                  <div className="aspect-square">
-                    {renderSquare(topRow[10], 30)}
-                  </div>
+    <div className="w-full h-full flex items-center justify-center gap-4">
+      <div className="w-full h-full relative">
+        {/* Decorative border */}
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-2 shadow-2xl">
+          <div className="w-full h-full bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl p-2">
+            <div className="w-full h-full grid grid-cols-11 grid-rows-11 gap-0">
+              {/* Top Row */}
+              <div className="col-span-11 row-span-1 grid grid-cols-11 gap-0">
+                {/* Free Parking Corner */}
+                <div className="aspect-square">
+                  {renderSquare(topRow[0], 20)}
                 </div>
-
-                {/* Middle 9 Rows */}
-                {Array.from({ length: 9 }, (_, rowIdx) => (
-                  <div key={`middle-row-${rowIdx}`} className="col-span-11 row-span-1 grid grid-cols-11 gap-0">
-                    {/* Left Column Square */}
-                    <div className="aspect-square transform rotate-90">
-                      {leftColumn[8 - rowIdx] && renderSquare(leftColumn[8 - rowIdx], 19 - rowIdx)}
-                    </div>
-                    
-                    {/* Center Board Area */}
-                    <div className="col-span-9 row-span-1 bg-gradient-to-br from-slate-800/50 to-slate-900/50 flex items-center justify-center">
-                      {rowIdx === 4 && (
-                        <div className="relative w-full h-full flex items-center justify-center">
-                          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-blue-600/20 blur-xl rounded-full"></div>
-                          <Card className="relative bg-slate-900/90 p-6 border-2 border-blue-500/30 backdrop-blur-sm max-w-sm">
-                            {gameState.gamePhase === 'waiting' ? (
-                              <div className="text-center">
-                                <Text className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-blue-200 mb-2">
-                                  LANDLORDS.GG
-                                </Text>
-                                <Text className="text-sm text-blue-200/80 mb-3">Web3 Monopoly</Text>
-                                <div className="space-y-2">
-                                  <Text className="text-sm text-slate-300">
-                                    Players: {gameState.players.length}/4
-                                  </Text>
-                                  <Text className="text-xs text-slate-400">
-                                    Waiting for game to start...
-                                  </Text>
-                                </div>
-                              </div>
-                            ) : gameState.gamePhase === 'started' ? (
-                              <div className="text-center space-y-3">
-                                <Text className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-green-200">
-                                  GAME ACTIVE
-                                </Text>
-                                {gameState.currentPlayer && (
-                                  <div className="space-y-1">
-                                    <Text className="text-sm text-green-200">Current Turn:</Text>
-                                    <Text className="text-sm font-bold text-white">
-                                      {gameState.players.find(p => p.peerId === gameState.currentPlayer)?.baseName ||
-                                       `${gameState.players.find(p => p.peerId === gameState.currentPlayer)?.address.slice(0, 6)}...`}
-                                    </Text>
-                                  </div>
-                                )}
-                                {gameState.diceRoll && (
-                                  <div className="flex items-center justify-center space-x-2">
-                                    <Text className="text-sm text-orange-200">Last Roll:</Text>
-                                    <div className="text-2xl">🎲</div>
-                                    <Text className="text-xl font-bold text-orange-300">{gameState.diceRoll}</Text>
-                                  </div>
-                                )}
-                                <div className="grid grid-cols-2 gap-2 text-xs">
-                                  <div className="text-center">
-                                    <Text className="text-slate-400">Round</Text>
-                                    <Text className="text-blue-300 font-bold">1</Text>
-                                  </div>
-                                  <div className="text-center">
-                                    <Text className="text-slate-400">Turn</Text>
-                                    <Text className="text-purple-300 font-bold">
-                                      {gameState.players.findIndex(p => p.peerId === gameState.currentPlayer) + 1}
-                                    </Text>
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="text-center">
-                                <div className="text-4xl mb-2">🏆</div>
-                                <Text className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-200">
-                                  GAME OVER
-                                </Text>
-                                <Text className="text-sm text-yellow-200/80 mt-2">
-                                  Thanks for playing!
-                                </Text>
-                              </div>
-                            )}
-                          </Card>
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Right Column Square */}
-                    <div className="aspect-square transform -rotate-90">
-                      {rightColumn[rowIdx] && renderSquare(rightColumn[rowIdx], 31 + rowIdx)}
-                    </div>
+                {/* Top properties */}
+                {topRow.slice(1, -1).map((tile, idx) => (
+                  <div key={`top-${idx}`} className="aspect-square transform rotate-180">
+                    {renderSquare(tile, 21 + idx)}
                   </div>
                 ))}
+                {/* Go to Jail Corner */}
+                <div className="aspect-square">
+                  {renderSquare(topRow[10], 30)}
+                </div>
+              </div>
 
-                {/* Bottom Row */}
-                <div className="col-span-11 row-span-1 grid grid-cols-11 gap-0">
-                  {/* Jail Corner */}
-                  <div className="aspect-square">
-                    {renderSquare(bottomRow[10], 10)}
+              {/* Middle 9 Rows */}
+              {Array.from({ length: 9 }, (_, rowIdx) => (
+                <div key={`middle-row-${rowIdx}`} className="col-span-11 row-span-1 grid grid-cols-11 gap-0">
+                  {/* Left Column Square */}
+                  <div className="aspect-square transform rotate-90">
+                    {leftColumn[8 - rowIdx] && renderSquare(leftColumn[8 - rowIdx], 19 - rowIdx)}
                   </div>
-                  {/* Bottom properties */}
-                  {bottomRow.slice(1, -1).reverse().map((tile, idx) => (
-                    <div key={`bottom-${idx}`} className="aspect-square">
-                      {renderSquare(tile, 9 - idx)}
-                    </div>
-                  ))}
-                  {/* GO Corner */}
-                  <div className="aspect-square">
-                    {renderSquare(bottomRow[0], 0)}
+                  
+                  {/* Center Board Area */}
+                  <div className="col-span-9 row-span-1 bg-gradient-to-br from-slate-800/50 to-slate-900/50 flex items-center justify-center">
+                    {rowIdx === 4 && (
+                      <div className="relative w-full h-full flex items-center justify-center">
+                        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-blue-600/20 blur-xl rounded-full"></div>
+                        <Card className="relative bg-slate-900/90 p-6 border-2 border-blue-500/30 backdrop-blur-sm max-w-sm">
+                          {gameState.gamePhase === 'waiting' ? (
+                            <div className="text-center">
+                              <Text className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-blue-200 mb-2">
+                                LANDLORDS.GG
+                              </Text>
+                              <Text className="text-sm text-blue-200/80 mb-3">Web3 Monopoly</Text>
+                              <div className="space-y-2">
+                                <Text className="text-sm text-slate-300">
+                                  Players: {gameState.players.length}/4
+                                </Text>
+                                <Text className="text-xs text-slate-400">
+                                  Waiting for game to start...
+                                </Text>
+                              </div>
+                            </div>
+                          ) : gameState.gamePhase === 'started' ? (
+                            <div className="text-center space-y-3">
+                              <Text className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-green-200">
+                                GAME ACTIVE
+                              </Text>
+                              {gameState.currentPlayer && (
+                                <div className="space-y-1">
+                                  <Text className="text-sm text-green-200">Current Turn:</Text>
+                                  <Text className="text-sm font-bold text-white">
+                                    {gameState.players.find(p => p.peerId === gameState.currentPlayer)?.baseName ||
+                                     `${gameState.players.find(p => p.peerId === gameState.currentPlayer)?.address.slice(0, 6)}...`}
+                                  </Text>
+                                </div>
+                              )}
+                              {gameState.diceRoll && (
+                                <div className="flex items-center justify-center space-x-2">
+                                  <Text className="text-sm text-orange-200">Last Roll:</Text>
+                                  <div className="text-2xl">🎲</div>
+                                  <Text className="text-xl font-bold text-orange-300">{gameState.diceRoll}</Text>
+                                </div>
+                              )}
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div className="text-center">
+                                  <Text className="text-slate-400">Round</Text>
+                                  <Text className="text-blue-300 font-bold">1</Text>
+                                </div>
+                                <div className="text-center">
+                                  <Text className="text-slate-400">Turn</Text>
+                                  <Text className="text-purple-300 font-bold">
+                                    {gameState.players.findIndex(p => p.peerId === gameState.currentPlayer) + 1}
+                                  </Text>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-center">
+                              <div className="text-4xl mb-2">🏆</div>
+                              <Text className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-200">
+                                GAME OVER
+                              </Text>
+                              <Text className="text-sm text-yellow-200/80 mt-2">
+                                Thanks for playing!
+                              </Text>
+                            </div>
+                          )}
+                        </Card>
+                      </div>
+                    )}
                   </div>
+                  
+                  {/* Right Column Square */}
+                  <div className="aspect-square transform -rotate-90">
+                    {rightColumn[rowIdx] && renderSquare(rightColumn[rowIdx], 31 + rowIdx)}
+                  </div>
+                </div>
+              ))}
+
+              {/* Bottom Row */}
+              <div className="col-span-11 row-span-1 grid grid-cols-11 gap-0">
+                {/* Jail Corner */}
+                <div className="aspect-square">
+                  {renderSquare(bottomRow[10], 10)}
+                </div>
+                {/* Bottom properties */}
+                {bottomRow.slice(1, -1).reverse().map((tile, idx) => (
+                  <div key={`bottom-${idx}`} className="aspect-square">
+                    {renderSquare(tile, 9 - idx)}
+                  </div>
+                ))}
+                {/* GO Corner */}
+                <div className="aspect-square">
+                  {renderSquare(bottomRow[0], 0)}
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-    </Tooltip.Provider>
+      {/* Property Sidebar */}
+      <PropertySidebar 
+        players={gameState.players}
+        myPeerId={myPeerId}
+        isCurrentPlayer={isCurrentPlayer}
+        currentPlayerPosition={currentPlayerPosition}
+        gamePhase={gameState.gamePhase}
+        playerColors={playerColors}
+        onBuyProperty={handleBuyProperty}
+      />
+    </div>
   );
 }
-

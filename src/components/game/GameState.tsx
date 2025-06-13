@@ -7,6 +7,7 @@ import { useName } from '@coinbase/onchainkit/identity';
 import { Card } from '../retroui/Card';
 import { Button } from '../retroui/Button';
 import { Text } from '../retroui/Text';
+import { base } from 'viem/chains';
 
 interface Player {
   peerId: string;
@@ -31,7 +32,7 @@ interface GameState {
 
 export default function GameState() {
   const { address } = useAccount();
-  const { data: baseName } = useName({ address: address as `0x${string}` });
+  const { data: baseName } = useName({ address: address as `0x${string}`, chain: base });
   const { peerIds } = usePeerIds();
   const { peerId: myPeerId } = useLocalPeer();
   

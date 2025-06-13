@@ -28,9 +28,10 @@ interface PropertySquareProps {
   property: Property;
   position: number;
   players: Player[];
+  playerColors: { [peerId: string]: string };
 }
 
-const PropertySquare: React.FC<PropertySquareProps> = ({ property, position, players }) => {
+const PropertySquare: React.FC<PropertySquareProps> = ({ property, position, players, playerColors }) => {
   const getGroupColor = (group: string) => {
     const colors = {
       'Purple': 'bg-gradient-to-br from-blue-600 to-blue-700',
@@ -73,15 +74,17 @@ const PropertySquare: React.FC<PropertySquareProps> = ({ property, position, pla
 
         {/* Player tokens */}
         <div className="absolute bottom-1 left-1 right-1 flex flex-wrap gap-1">
-          {players.map((player, index) => (
-            <div
-              key={player.peerId}
-              className="w-2 h-2 rounded-full bg-blue-500"
-              style={{
-                backgroundColor: `hsl(${index * 137.5 % 360}, 70%, 50%)`
-              }}
-            />
-          ))}
+          {players.map((player) => {
+            const playerColor = playerColors[player.peerId] || '#888';
+            return (
+              <div
+                key={player.peerId}
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: playerColor }}
+                title={player.baseName || player.address.slice(0, 6)}
+              />
+            );
+          })}
         </div>
       </div>
     </div>
